@@ -1,0 +1,5 @@
+.header { display:flex; justify-content:space-between; align-items:center; padding:12px 20px;
+border-bottom:1px solid #eee; }
+.brand { font-weight:700; }
+.nav a { margin-left:16px; text-decoration:none; color:#333; }
+.nav a:hover { text-decoration:underline; }
