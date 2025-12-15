@@ -1,10 +1,14 @@
 import mongoose from "mongoose";
-const userSchema = new mongoose.Schema(
-{
-email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-name: { type: String, required: true, trim: true },
-passwordHash: { type: String, required: true } // (hash akan dibahas di modul security)
-},
-{ timestamps: true }
-);
+
+const userSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  role: {
+    type: String,
+    enum: ["customer", "admin", "manager"],
+    default: "customer",
+  },
+}, { timestamps: true });
+
 export default mongoose.model("User", userSchema);
