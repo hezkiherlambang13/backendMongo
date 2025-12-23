@@ -2,11 +2,11 @@ import mongoose from "mongoose";
 
 const packageSchema = new mongoose.Schema({
   title: String,
+  description: String,
   price: Number,
-  category: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Category"
-  }
-});
+  date: String,
+  time: String,
+  duration: String,
+}, { timestamps: true });
 
 export default mongoose.model("Package", packageSchema);
