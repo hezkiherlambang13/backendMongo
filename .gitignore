@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.*
+frontend/
+online-shop/
+src/App.js
+src/components/
