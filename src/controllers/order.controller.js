@@ -5,12 +5,12 @@ const User = require('../models/User.model');
 const bookPackage = async (req, res) => {
   try {
     const { packageId, date, time } = req.body;
-    const customerId = req.user.id;
+    const userId = req.user.id;
 
     const pkg = await Package.findById(packageId);
     if (!pkg) return res.status(404).json({ message: 'Package not found.' });
 
-    const order = new Order({ customer: customerId, package: packageId, date, time });
+    const order = new Order({ user: userId, package: packageId, date, time });
     await order.save();
 
     res.status(201).json(order);

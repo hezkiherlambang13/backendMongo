@@ -1,232 +1,280 @@
-import Booking from '../models/Booking.model.js';
-import Package from '../models/Package.model.js';
+// server/src/controllers/booking.controller.js
+import { PrismaClient } from '@prisma/client';
+import { addMinutes } from '../utils/Datehelper.js';
 
-// Get all bookings (Admin/Manager: semua, Customer: miliknya saja)
+const prisma = new PrismaClient();
+
 export const getAllBookings = async (req, res) => {
   try {
-    const filter = {};
-    
-    // Jika customer, hanya tampilkan booking miliknya
-    if (req.user.role === 'customer') {
-      filter.user = req.user.id;
-    }
-    
-    const bookings = await Booking.find(filter)
-      .populate('user', 'name email')
-      .populate('package', 'name price category')
-      .populate('approvedBy', 'name')
-      .sort({ createdAt: -1 });
-      
+    const where = req.user.role === 'user' ? { userId: req.user.id } : {};
+    const bookings = await prisma.booking.findMany({
+      where,
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true } },
+        package: { select: { id: true, name: true, price: true, category: true, images: true } },
+        background: true,
+        slot: true,
+        approvedBy: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
     res.json({ success: true, data: bookings });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get single booking
-export const getBookingById = async (req, res) => {
-  try {
-    const booking = await Booking.findById(req.params.id)
-      .populate('user', 'name email')
-      .populate('package')
-      .populate('approvedBy', 'name');
-      
-    if (!booking) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
-    }
-    
-    // Customer hanya bisa lihat booking miliknya
-    if (req.user.role === 'customer' && booking.user._id.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, message: 'Access denied' });
-    }
-    
-    res.json({ success: true, data: booking });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Create booking (Customer)
 export const createBooking = async (req, res) => {
   try {
-    const { packageId, bookingDate, bookingTime, customerName, customerPhone, customerEmail, notes } = req.body;
-    
-    // Validasi package exists
-    const package_ = await Package.findById(packageId);
-    if (!package_) {
-      return res.status(404).json({ success: false, message: 'Package not found' });
+    const { packageId, backgroundId, slotId, bookingDate, bookingTime, userName, userPhone, userEmail, notes } = req.body;
+
+    // ✅ FIX: parseInt semua id
+    const pkgId = parseInt(packageId);
+    const bgId = backgroundId ? parseInt(backgroundId) : null;
+    const slId = slotId ? parseInt(slotId) : null;
+
+    if (isNaN(pkgId)) return res.status(400).json({ success: false, message: 'packageId tidak valid' });
+
+    const pkg = await prisma.package.findUnique({ where: { id: pkgId }, include: { backgrounds: true } });
+    if (!pkg) return res.status(404).json({ success: false, message: 'Paket tidak ditemukan' });
+    if (!pkg.isActive) return res.status(400).json({ success: false, message: 'Paket tidak tersedia' });
+
+    if (bgId) {
+      const bg = await prisma.packageBackground.findUnique({ where: { id: bgId } });
+      if (!bg || !bg.isAvailable) return res.status(400).json({ success: false, message: 'Background tidak tersedia' });
     }
-    
-    if (!package_.isActive) {
-      return res.status(400).json({ success: false, message: 'Package is not available' });
-    }
-    
-    // Cek apakah tanggal dan waktu sudah dibooking
-    const existingBooking = await Booking.findOne({
-      package: packageId,
-      bookingDate: new Date(bookingDate),
-      bookingTime,
-      status: { $in: ['pending', 'approved'] }
-    });
-    
-    if (existingBooking) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'This time slot is already booked' 
+
+    if (slId) {
+      const slot = await prisma.timeSlot.findUnique({ where: { id: slId } });
+      if (!slot) return res.status(404).json({ success: false, message: 'Slot tidak ditemukan' });
+      if (slot.status !== 'available') return res.status(400).json({ success: false, message: 'Slot sudah dipesan' });
+      await prisma.timeSlot.update({ where: { id: slId }, data: { status: 'booked' } });
+    } else {
+      const existing = await prisma.booking.findFirst({
+        where: { packageId: pkgId, bookingDate: new Date(bookingDate), bookingTime, status: { in: ['pending', 'approved'] } },
       });
+      if (existing) return res.status(400).json({ success: false, message: 'Slot waktu ini sudah dipesan' });
     }
-    
-    const newBooking = await Booking.create({
-      user: req.user.id,
-      package: packageId,
-      bookingDate: new Date(bookingDate),
-      bookingTime,
-      customerName,
-      customerPhone,
-      customerEmail,
-      notes,
-      totalPrice: package_.price,
-      status: 'pending'
+
+    const booking = await prisma.booking.create({
+      data: {
+        userId: req.user.id,
+        packageId: pkgId,
+        backgroundId: bgId,
+        slotId: slId,
+        bookingDate: new Date(bookingDate),
+        bookingTime,
+        userName,
+        userPhone,
+        userEmail,
+        notes: notes || '',
+        totalPrice: pkg.price,
+        status: 'pending',
+        paymentStatus: 'unpaid',
+        expiresAt: addMinutes(new Date(), 15),
+      },
+      include: { package: true, background: true, slot: true },
     });
-    
-    const populatedBooking = await Booking.findById(newBooking._id)
-      .populate('package', 'name price category');
-    
-    res.status(201).json({ 
-      success: true, 
-      message: 'Booking created successfully. Waiting for approval.', 
-      data: populatedBooking 
-    });
+
+    res.status(201).json({ success: true, message: 'Booking berhasil dibuat. Menunggu konfirmasi admin (15 menit).', data: booking });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Update booking status (Manager/Admin)
 export const updateBookingStatus = async (req, res) => {
   try {
-    const { status } = req.body;
-    
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
-    }
-    
-    booking.status = status;
-    
+    // ✅ FIX: parseInt id
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ success: false, message: 'ID tidak valid' });
+
+    const { status, cancelReason } = req.body;
+    const booking = await prisma.booking.findUnique({ where: { id }, include: { slot: true } });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking tidak ditemukan' });
+
+    const updateData = { status };
     if (status === 'approved') {
-      booking.approvedBy = req.user.id;
-      booking.approvedAt = new Date();
+      updateData.approvedById = req.user.id;
+      updateData.approvedAt = new Date();
+      updateData.paymentDeadline = addMinutes(new Date(), 24 * 60);
     }
-    
-    await booking.save();
-    
-    const updatedBooking = await Booking.findById(booking._id)
-      .populate('user', 'name email')
-      .populate('package', 'name price category')
-      .populate('approvedBy', 'name');
-    
-    res.json({ 
-      success: true, 
-      message: `Booking ${status} successfully`, 
-      data: updatedBooking 
+    if (status === 'rejected' || status === 'cancelled') {
+      if (cancelReason) updateData.cancelReason = cancelReason;
+      if (booking.slotId) {
+        await prisma.timeSlot.update({ where: { id: booking.slotId }, data: { status: 'available' } });
+      }
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: updateData,
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true } },
+        package: { select: { id: true, name: true, price: true, category: true } },
+        background: true, slot: true,
+        approvedBy: { select: { id: true, name: true } },
+      },
     });
+    res.json({ success: true, message: `Booking berhasil di-${status}`, data: updated });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Update payment status (Admin)
-export const updatePaymentStatus = async (req, res) => {
+export const getWhatsAppLink = async (req, res) => {
   try {
-    const { paymentStatus } = req.body;
-    
-    const booking = await Booking.findByIdAndUpdate(
-      req.params.id,
-      { paymentStatus },
-      { new: true }
-    ).populate('user package');
-    
-    if (!booking) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
-    }
-    
-    res.json({ 
-      success: true, 
-      message: 'Payment status updated', 
-      data: booking 
-    });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ success: false, message: 'ID tidak valid' });
+
+    const booking = await prisma.booking.findUnique({ where: { id }, include: { package: true, background: true } });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking tidak ditemukan' });
+    if (booking.status !== 'approved') return res.status(400).json({ success: false, message: 'Booking belum diapprove.' });
+    if (booking.userId !== req.user.id) return res.status(403).json({ success: false, message: 'Akses ditolak' });
+
+    const adminWA = process.env.ADMIN_WHATSAPP || '628100000000';
+    const date = new Date(booking.bookingDate).toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const message = encodeURIComponent(
+      `Halo Admin Digibox Studio! 📸\n\n` +
+      `• ID: #${booking.id}\n• Nama: ${booking.userName}\n• Paket: ${booking.package?.name}\n` +
+      `• Tanggal: ${date}\n• Jam: ${booking.bookingTime}\n• Total: Rp ${booking.totalPrice?.toLocaleString('id-ID')}\n\nTerima kasih! 🙏`
+    );
+
+    await prisma.booking.update({ where: { id }, data: { paymentStatus: 'waiting_confirmation' } });
+    res.json({ success: true, data: { waLink: `https://wa.me/${adminWA}?text=${message}`, booking } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Cancel booking (Customer - hanya bisa cancel booking miliknya yang pending)
 export const cancelBooking = async (req, res) => {
   try {
-    const booking = await Booking.findById(req.params.id);
-    
-    if (!booking) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ success: false, message: 'ID tidak valid' });
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking tidak ditemukan' });
+    if (booking.userId !== req.user.id) return res.status(403).json({ success: false, message: 'Akses ditolak' });
+    if (!['pending', 'approved'].includes(booking.status)) return res.status(400).json({ success: false, message: 'Booking tidak bisa dibatalkan' });
+
+    if (booking.slotId) {
+      await prisma.timeSlot.update({ where: { id: booking.slotId }, data: { status: 'available' } });
     }
-    
-    // Validasi: hanya user yang buat booking yang bisa cancel
-    if (booking.user.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, message: 'Access denied' });
-    }
-    
-    // Hanya bisa cancel jika status pending
-    if (booking.status !== 'pending') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Only pending bookings can be cancelled' 
-      });
-    }
-    
-    booking.status = 'cancelled';
-    await booking.save();
-    
-    res.json({ success: true, message: 'Booking cancelled successfully' });
+    await prisma.booking.update({ where: { id }, data: { status: 'cancelled', cancelReason: 'Dibatalkan oleh user' } });
+    res.json({ success: true, message: 'Booking berhasil dibatalkan' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Delete booking (Admin only)
 export const deleteBooking = async (req, res) => {
   try {
-    const booking = await Booking.findByIdAndDelete(req.params.id);
-    if (!booking) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ success: false, message: 'ID tidak valid' });
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking tidak ditemukan' });
+
+    if (booking.slotId) {
+      await prisma.timeSlot.update({ where: { id: booking.slotId }, data: { status: 'available' } });
     }
-    res.json({ success: true, message: 'Booking deleted successfully' });
+    await prisma.booking.delete({ where: { id } });
+    res.json({ success: true, message: 'Booking berhasil dihapus' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get booking statistics (Admin/Manager)
 export const getBookingStats = async (req, res) => {
   try {
-    const totalBookings = await Booking.countDocuments();
-    const pendingBookings = await Booking.countDocuments({ status: 'pending' });
-    const approvedBookings = await Booking.countDocuments({ status: 'approved' });
-    const completedBookings = await Booking.countDocuments({ status: 'completed' });
-    const totalRevenue = await Booking.aggregate([
-      { $match: { status: 'completed', paymentStatus: 'paid' } },
-      { $group: { _id: null, total: { $sum: '$totalPrice' } } }
+    const [total, pending, approved, completed, expired, revenueData] = await Promise.all([
+      prisma.booking.count(),
+      prisma.booking.count({ where: { status: 'pending' } }),
+      prisma.booking.count({ where: { status: 'approved' } }),
+      prisma.booking.count({ where: { status: 'completed' } }),
+      prisma.booking.count({ where: { status: 'expired' } }),
+      prisma.booking.aggregate({ where: { status: 'completed', paymentStatus: 'paid' }, _sum: { totalPrice: true } }),
     ]);
-    
     res.json({
       success: true,
-      data: {
-        totalBookings,
-        pendingBookings,
-        approvedBookings,
-        completedBookings,
-        totalRevenue: totalRevenue[0]?.total || 0
-      }
+      data: { totalBookings: total, pendingBookings: pending, approvedBookings: approved, completedBookings: completed, expiredBookings: expired, totalRevenue: revenueData._sum.totalPrice || 0 },
     });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const expireBookings = async () => {
+  try {
+    const now = new Date();
+    const expiredBookings = await prisma.booking.findMany({ where: { status: 'pending', expiresAt: { lt: now } } });
+    for (const booking of expiredBookings) {
+      if (booking.slotId) {
+        await prisma.timeSlot.update({ where: { id: booking.slotId }, data: { status: 'available' } });
+      }
+      await prisma.booking.update({ where: { id: booking.id }, data: { status: 'expired', cancelReason: 'Booking expired' } });
+    }
+    if (expiredBookings.length > 0) console.log(`⏰ ${expiredBookings.length} booking expired`);
+  } catch (error) {
+    console.error('Error expiring bookings:', error);
+  }
+};
+
+// ===== GET BOOKED TIMES untuk tanggal & paket tertentu =====
+export const getBookedTimes = async (req, res) => {
+  try {
+    const { packageId, date } = req.query;
+    if (!packageId || !date) {
+      return res.status(400).json({ success: false, message: 'packageId dan date diperlukan' });
+    }
+
+    const pkgId = parseInt(packageId);
+    if (isNaN(pkgId)) return res.status(400).json({ success: false, message: 'packageId tidak valid' });
+
+    const bookings = await prisma.booking.findMany({
+      where: {
+        packageId: pkgId,
+        bookingDate: new Date(date),
+        status: { in: ['pending', 'approved'] },
+      },
+      select: { bookingTime: true },
+    });
+
+    const bookedTimes = bookings.map(b => b.bookingTime);
+    res.json({ success: true, data: bookedTimes });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ===== UPDATE PHOTO PICKUP (Admin/Manager) =====
+export const updatePhotoPickup = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ success: false, message: 'ID tidak valid' });
+
+    const { photoPickupDate, photoPickupBy, photoPickupNotes, photoPickupStatus } = req.body;
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking tidak ditemukan' });
+    if (!['approved', 'completed'].includes(booking.status))
+      return res.status(400).json({ success: false, message: 'Hanya booking approved/completed yang bisa diupdate pengambilan foto' });
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: {
+        photoPickupDate: photoPickupDate ? new Date(photoPickupDate) : booking.photoPickupDate,
+        photoPickupBy: photoPickupBy ?? booking.photoPickupBy,
+        photoPickupNotes: photoPickupNotes ?? booking.photoPickupNotes,
+        photoPickupStatus: photoPickupStatus ?? booking.photoPickupStatus,
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        package: { select: { id: true, name: true } },
+        approvedBy: { select: { id: true, name: true } },
+      },
+    });
+
+    res.json({ success: true, message: 'Info pengambilan foto berhasil diupdate', data: updated });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

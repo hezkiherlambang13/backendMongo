@@ -1,37 +1,15 @@
+// ============================================================
+// server/src/middlewares/roleCheck.middleware.js
+// ============================================================
 export const roleCheck = (...allowedRoles) => {
   return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Unauthorized' });
-    }
-    
-    if (!allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ 
-        message: `Access denied. Required role: ${allowedRoles.join(' or ')}` 
+    if (!req.user)
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    if (!allowedRoles.includes(req.user.role))
+      return res.status(403).json({
+        success: false,
+        message: `Akses ditolak. Diperlukan role: ${allowedRoles.join(' atau ')}`,
       });
-    }
-    
     next();
   };
 };
-
-
-// const jwt = require('jsonwebtoken');
-// const User = require('../models/User.model');
-
-// const auth = async (req, res, next) => {
-//   const token = req.header('Authorization')?.replace('Bearer ', '');
-//   if (!token) return res.status(401).json({ message: 'Access denied. No token provided.' });
-
-//   try {
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//     const user = await User.findById(decoded.id);
-//     if (!user) return res.status(401).json({ message: 'Invalid token.' });
-
-//     req.user = user;
-//     next();
-//   } catch (error) {
-//     res.status(401).json({ message: 'Invalid or expired token.' });
-//   }
-// };
-
-// module.exports = auth;

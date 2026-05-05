@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String    @unique
+  password  String?
+  googleId  String?   @unique
+  phone     String?
+  role      Role      @default(user)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  bookings         Booking[] @relation("UserBookings")
+  approvedBookings Booking[] @relation("ApprovedBookings")
+}
+
+enum Role {
+  admin
+  manager
+  user
+}
+
+model Package {
+  id            Int       @id @default(autoincrement())
+  name          String
+  description   String?
+  price         Float
+  category      String?
+  images        String[]
+  features      String[]
+  duration      String?
+  availableDays String[]
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  bookings    Booking[]
+  backgrounds PackageBackground[]
+}
+
+model PackageBackground {
+  id          Int      @id @default(autoincrement())
+  name        String
+  imageUrl    String?
+  isAvailable Boolean  @default(true)
+  packageId   Int
+  createdAt   DateTime @default(now())
+
+  package  Package   @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+}
+
+model TimeSlot {
+  id        Int       @id @default(autoincrement())
+  status    String    @default("available")
+  startTime String?
+  endTime   String?
+  date      DateTime?
+  createdAt DateTime  @default(now())
+
+  bookings Booking[]
+}
+
+model Booking {
+  id              Int       @id @default(autoincrement())
+  userId          Int
+  packageId       Int?
+  backgroundId    Int?
+  slotId          Int?
+  bookingDate     DateTime?
+  bookingTime     String?
+  userName        String?
+  userPhone       String?
+  userEmail       String?
+  notes           String?
+  totalPrice      Float?
+  status          String    @default("pending")
+  paymentStatus   String    @default("unpaid")
+  cancelReason    String?
+  expiresAt       DateTime?
+  approvedById    Int?
+  approvedAt      DateTime?
+  paymentDeadline DateTime?
+  // ✅ NEW: Fitur pengambilan foto cetak
+  photoPickupDate   DateTime?
+  photoPickupBy     String?
+  photoPickupNotes  String?
+  photoPickupStatus String?   @default("belum_diambil")
+  createdAt       DateTime  @default(now())
+
+  user       User               @relation("UserBookings", fields: [userId], references: [id])
+  package    Package?           @relation(fields: [packageId], references: [id])
+  background PackageBackground? @relation(fields: [backgroundId], references: [id])
+  slot       TimeSlot?          @relation(fields: [slotId], references: [id])
+  approvedBy User?              @relation("ApprovedBookings", fields: [approvedById], references: [id])
+}
+
+model LoginBackground {
+  id        Int      @id @default(autoincrement())
+  url       String
+  type      String   @default("image")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}

@@ -5,3 +5,5 @@ frontend/
 online-shop/
 src/App.js
 src/components/
+
+/src/generated/prisma

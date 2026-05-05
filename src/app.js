@@ -1,14 +1,19 @@
+// server/src/app.js
 import express from 'express';
-import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { notFound, errorHandler } from './middlewares/error.middleware.js';
+import { startCronJobs } from './cron/Expirebookings.cron .js';
 
-// Routes
 import authRoutes from './routes/auth.routes.js';
 import packageRoutes from './routes/package.routes.js';
 import bookingRoutes from './routes/booking.routes.js';
+import loginBgRoutes from './routes/Loginbackground.routes.js';
+import packageBgRoutes from './routes/packagebackground.routes.js';
+import timeSlotRoutes from './routes/Timeslot.routes.js';
+import adminRoutes from './routes/Admin.routes.js';
 
 dotenv.config();
 
@@ -17,83 +22,36 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 
-// Serve static files (uploaded images)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
-
-// Database connection
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log(' MongoDB connected'))
-  .catch((err) => console.error(' MongoDB connection error:', err));
+// Health check
+app.get('/', (req, res) => {
+  res.json({ message: '📸 Studio Bion API is running ✅' });
+});
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/packages', packageRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/login-backgrounds', loginBgRoutes);
+app.use('/api/package-backgrounds', packageBgRoutes);
+app.use('/api/time-slots', timeSlotRoutes);
+app.use('/api/admin', adminRoutes);
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ 
-    success: false, 
-    message: err.message || 'Internal server error' 
-  });
-});
+// Error handlers
+app.use(notFound);
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  startCronJobs();
 });
 
 export default app;
-
-
-
-// import express from "express";
-// import morgan from "morgan";
-// import cors from "cors";
-// import dotenv from "dotenv";
-// import mongoose from "mongoose";
-// // import nodemon from "nodemon";
-
-// import bookingRoute from "./routes/booking.js";
-// import productRoutes from "./routes/product.routes.js";
-// import userRoutes from "./routes/user.routes.js";
-// import { config } from "./config.js";
-// import { notFound, errorHandler } from "./middlewares/error.middleware.js";
-
-// dotenv.config();
-
-// const app = express();
-
-// // Koneksi MongoDB
-// mongoose
-//   .connect(config.mongoUri)
-//   .then(() => console.log("MongoDB connected"))
-//   .catch((err) => console.error("MongoDB error:", err));
-
-// app.use(cors());
-// app.use(morgan("dev"));
-// app.use(express.json());
-
-// // Routes
-// app.get("/", (req, res) => res.json({ message: "API is running" }));
-// app.use("/api/products", productRoutes);
-// app.use("/api/users", userRoutes);
-// app.use("/api/bookings", bookingRoute);
-
-// // Error handler (HARUS PALING BAWAH)
-// app.use(notFound);
-// app.use(errorHandler);
-
-// // Server start (PALING TERAKHIR)
-// const PORT = process.env.PORT || 5000;  
-
-// // 5000
-
-// app.listen(PORT, () => console.log(`Server on http://localhost:${PORT}`));
-
