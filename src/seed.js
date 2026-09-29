@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Seeding database Studio Bion...\n');
 
-  // Admin
+  // ===== ADMIN =====
   const adminPass = await bcrypt.hash('admin123', 10);
   const admin = await prisma.user.upsert({
     where: { email: 'admin@studiobion.com' },
@@ -18,7 +18,7 @@ async function main() {
   });
   console.log('✅ Admin:', admin.email);
 
-  // Manager
+  // ===== MANAGER =====
   const managerPass = await bcrypt.hash('manager123', 10);
   const manager = await prisma.user.upsert({
     where: { email: 'manager@studiobion.com' },
@@ -27,10 +27,24 @@ async function main() {
   });
   console.log('✅ Manager:', manager.email);
 
-  // Sample packages
-  const packages = [
+  // ===== STUDIO (✅ FIX: ditambahkan, sebelumnya belum ada) =====
+  const studio1 = await prisma.studio.upsert({
+    where: { key: 'studio1' },
+    update: {},
+    create: { key: 'studio1', name: 'Studio 1', isActive: true },
+  });
+  const studio2 = await prisma.studio.upsert({
+    where: { key: 'studio2' },
+    update: {},
+    create: { key: 'studio2', name: 'Studio 2', isActive: true },
+  });
+  console.log('✅ Studio:', studio1.name, '&', studio2.name);
+
+  // ===== SAMPLE PACKAGES =====
+  // ✅ FIX: tidak pakai id string manual (id di Package adalah Int autoincrement),
+  // pakai findFirst + create supaya idempotent tanpa memaksa id.
+  const packagesData = [
     {
-      id: 'pkg-prewedding',
       name: 'Paket Prewedding',
       description: 'Abadikan momen cinta Anda dengan foto prewedding profesional',
       price: 2500000,
@@ -41,7 +55,6 @@ async function main() {
       isActive: true,
     },
     {
-      id: 'pkg-wisuda',
       name: 'Paket Wisuda',
       description: 'Rayakan pencapaian besar Anda dengan foto wisuda berkualitas tinggi',
       price: 750000,
@@ -52,7 +65,6 @@ async function main() {
       isActive: true,
     },
     {
-      id: 'pkg-keluarga',
       name: 'Paket Foto Keluarga',
       description: 'Moment kebersamaan keluarga yang tak terlupakan',
       price: 1200000,
@@ -64,62 +76,64 @@ async function main() {
     },
   ];
 
-  for (const pkg of packages) {
-    const created = await prisma.package.upsert({
-      where: { id: pkg.id },
-      update: {},
-      create: { ...pkg, images: [] },
-    });
-    console.log('✅ Package:', created.name);
-
-    // Sample backgrounds untuk setiap paket
-    const backgrounds = [
-      { name: 'Putih Polos', imageUrl: null },
-      { name: 'Hitam Elegan', imageUrl: null },
-      { name: 'Garden / Taman', imageUrl: null },
-      { name: 'Brick Wall', imageUrl: null },
-    ];
-
-    for (const bg of backgrounds) {
-      await prisma.packageBackground.upsert({
-        where: { id: `${pkg.id}-${bg.name}` },
-        update: {},
-        create: { id: `${pkg.id}-${bg.name}`, packageId: created.id, name: bg.name, imageUrl: bg.imageUrl, isAvailable: true },
-      }).catch(() => {}); // skip jika sudah ada
+  for (const pkgData of packagesData) {
+    let pkg = await prisma.package.findFirst({ where: { name: pkgData.name } });
+    if (!pkg) {
+      pkg = await prisma.package.create({ data: { ...pkgData, images: [] } });
+      console.log('✅ Package created:', pkg.name);
+    } else {
+      console.log('↺ Package sudah ada, skip:', pkg.name);
     }
-    console.log(`  ↳ ${backgrounds.length} backgrounds created`);
 
-    // Sample time slots untuk hari ini dan besok
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-
-    const dates = [today, tomorrow];
-    const times = [
-      { start: '09:00', end: '11:00' },
-      { start: '11:00', end: '13:00' },
-      { start: '13:00', end: '15:00' },
-      { start: '15:00', end: '17:00' },
-    ];
-
-    for (const date of dates) {
-      for (const time of times) {
-        const d = new Date(date);
-        d.setHours(0, 0, 0, 0);
-        await prisma.timeSlot.upsert({
-          where: { packageId_date_startTime: { packageId: created.id, date: d, startTime: time.start } },
-          update: {},
-          create: { packageId: created.id, date: d, startTime: time.start, endTime: time.end, status: 'available' },
+    // ===== BACKGROUNDS per paket =====
+    const bgNames = ['Putih Polos', 'Hitam Elegan', 'Garden / Taman', 'Brick Wall'];
+    for (const bgName of bgNames) {
+      const existingBg = await prisma.packageBackground.findFirst({
+        where: { packageId: pkg.id, name: bgName },
+      });
+      if (!existingBg) {
+        await prisma.packageBackground.create({
+          data: { packageId: pkg.id, name: bgName, imageUrl: null, isAvailable: true },
         });
       }
     }
-    console.log(`  ↳ ${dates.length * times.length} time slots created`);
+    console.log(`  ↳ ${bgNames.length} backgrounds dipastikan ada untuk "${pkg.name}"`);
   }
+
+  // ===== SAMPLE TIME SLOTS =====
+  // ✅ FIX: TimeSlot TIDAK punya packageId di schema — ini slot umum (misal untuk fitur booking berbasis slot,
+  // independen dari paket). Kita buat slot untuk hari ini & besok saja, tanpa unique constraint yang salah.
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+
+  const timeRanges = [
+    { start: '09:00', end: '11:00' },
+    { start: '11:00', end: '13:00' },
+    { start: '13:00', end: '15:00' },
+    { start: '15:00', end: '17:00' },
+  ];
+
+  let slotCount = 0;
+  for (const date of [today, tomorrow]) {
+    for (const range of timeRanges) {
+      const existing = await prisma.timeSlot.findFirst({
+        where: { date, startTime: range.start },
+      });
+      if (!existing) {
+        await prisma.timeSlot.create({
+          data: { date, startTime: range.start, endTime: range.end, status: 'available' },
+        });
+        slotCount++;
+      }
+    }
+  }
+  console.log(`  ↳ ${slotCount} time slot baru dibuat (hari ini & besok)`);
 
   console.log('\n🎉 Seeding selesai!');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('📧 Admin    : admin@studiobion.com    | Pass: admin123');
   console.log('📧 Manager  : manager@studiobion.com  | Pass: manager123');
+  console.log('🏢 Studio   : Studio 1 & Studio 2 aktif');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('⚠️  Segera ganti password setelah login pertama!');
 }
