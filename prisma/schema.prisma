@@ -28,21 +28,36 @@ enum Role {
   user
 }
 
+model Category {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  slug      String    @unique
+  createdAt DateTime  @default(now())
+
+  packages Package[]
+}
+
 model Package {
   id            Int       @id @default(autoincrement())
   name          String
   description   String?
   price         Float
   category      String?
+  categoryId    Int?
   images        String[]
   features      String[]
   duration      String?
   availableDays String[]
+  lynkUrl       String?
   isActive      Boolean   @default(true)
+  operatingStartTime String   @default("08:00") // ✅ NEW
+  operatingEndTime   String   @default("17:00") // ✅ NEW
   createdAt     DateTime  @default(now())
 
   bookings    Booking[]
   backgrounds PackageBackground[]
+   studios     Studio[]  @relation("PackageStudios") // ✅ NEW
+   categoryRef Category? @relation(fields: [categoryId], references: [id]) // ✅ NEW
 }
 
 model PackageBackground {
@@ -68,12 +83,27 @@ model TimeSlot {
   bookings Booking[]
 }
 
+// ✅ NEW: Studio 1 / Studio 2
+model Studio {
+  id        Int       @id @default(autoincrement())
+  key       String    @unique // "studio1" | "studio2"
+  name      String
+  note      String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  bookings Booking[]
+  packages Package[] @relation("PackageStudios") // ✅ NEW
+
+}
+
 model Booking {
   id              Int       @id @default(autoincrement())
   userId          Int
   packageId       Int?
   backgroundId    Int?
   slotId          Int?
+  studioId        Int?      // ✅ NEW
   bookingDate     DateTime?
   bookingTime     String?
   userName        String?
@@ -88,17 +118,21 @@ model Booking {
   approvedById    Int?
   approvedAt      DateTime?
   paymentDeadline DateTime?
-  // ✅ NEW: Fitur pengambilan foto cetak
+
   photoPickupDate   DateTime?
   photoPickupBy     String?
   photoPickupNotes  String?
   photoPickupStatus String?   @default("belum_diambil")
-  createdAt       DateTime  @default(now())
+
+  calendarEvents Json?
+
+  createdAt DateTime @default(now())
 
   user       User               @relation("UserBookings", fields: [userId], references: [id])
   package    Package?           @relation(fields: [packageId], references: [id])
   background PackageBackground? @relation(fields: [backgroundId], references: [id])
   slot       TimeSlot?          @relation(fields: [slotId], references: [id])
+  studio     Studio?            @relation(fields: [studioId], references: [id]) // ✅ NEW
   approvedBy User?              @relation("ApprovedBookings", fields: [approvedById], references: [id])
 }
 
@@ -108,4 +142,12 @@ model LoginBackground {
   type      String   @default("image")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+}
+model EmailTemplate {
+  id         Int      @id @default(autoincrement())
+  key        String   @unique
+  subject    String
+  bodyHtml   String
+  footerHtml String
+  updatedAt  DateTime @updatedAt
 }

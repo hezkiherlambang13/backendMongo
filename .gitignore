@@ -7,3 +7,7 @@ src/App.js
 src/components/
 
 /src/generated/prisma
+.env
+google-credentials.json
+google-credentials.json.json
+node_modules/
